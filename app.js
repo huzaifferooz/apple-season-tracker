@@ -11,6 +11,14 @@ const today = () => {
 };
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+const COLUMNS = {
+  sales: ["id", "date", "season", "variety", "boxes", "rate", "buyer"],
+  expenses: ["id", "date", "season", "category", "amount", "note"],
+};
+
+const config = window.APP_CONFIG || {};
+let db = null;
+let user; // undefined until the first auth check
 let data = { sales: [], expenses: [] };
 let season = new Date().getFullYear();
 const editing = { sales: null, expenses: null };
@@ -24,7 +32,7 @@ function say(text, isError = false) {
 const isText = (v) => typeof v === "string";
 const isAmount = (v) => Number.isFinite(v) && v > 0;
 const isBase = (r) => r && isText(r.id) && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isInteger(r.season);
-const isSale = (r) => isBase(r) && isText(r.variety) && isText(r.buyer) && isAmount(r.boxes) && isAmount(r.rate);
+const isSale = (r) => isBase(r) && isText(r.variety) && isText(r.buyer) && Number.isInteger(r.boxes) && isAmount(r.boxes) && isAmount(r.rate);
 const isExpense = (r) => isBase(r) && isText(r.category) && isText(r.note) && isAmount(r.amount);
 
 function parseData(text) {
@@ -36,26 +44,69 @@ function parseData(text) {
   return { sales: d.sales, expenses: d.expenses };
 }
 
-function load() {
-  let saved = null;
-  try {
-    saved = localStorage.getItem(KEY);
-    if (saved) data = parseData(saved);
-  } catch (e) {
-    // keep a copy of unreadable data so the next save cannot destroy it
-    try { if (saved) localStorage.setItem(KEY + "-damaged", saved); } catch (_) { /* storage blocked */ }
-    say("Saved records could not be read.", true);
+/* ---------- cloud ---------- */
+const pick = (type, record) => Object.fromEntries(COLUMNS[type].map((c) => [c, record[c]]));
+
+function check({ data: rows, error }) {
+  if (error) throw error;
+  return rows;
+}
+
+async function fetchAll(type) {
+  const all = [];
+  for (let from = 0; ; from += 1000) { // the API returns at most 1000 rows per request
+    const rows = check(await db.from(type).select(COLUMNS[type].join(",")).order("id").range(from, from + 999));
+    all.push(...rows);
+    if (rows.length < 1000) return all;
   }
 }
 
-function save() {
+async function upload(incoming, uid) {
+  for (const type of Object.keys(COLUMNS)) {
+    const rows = incoming[type].map((r) => ({ ...pick(type, r), user_id: uid }));
+    for (let i = 0; i < rows.length; i += 500) {
+      check(await db.from(type).upsert(rows.slice(i, i + 500), { onConflict: "user_id,id" }));
+    }
+  }
+}
+
+async function loadRecords() {
+  const owner = user;
+  $("app").hidden = true;
+  $("retry").hidden = true;
+  say("Loading your records...");
   try {
-    localStorage.setItem(KEY, JSON.stringify(data));
+    const [sales, expenses] = await Promise.all([fetchAll("sales"), fetchAll("expenses")]);
+    if (user !== owner) return;
+    data = { sales, expenses };
+    $("app").hidden = false;
+    say("");
+    render();
+    showDeviceRecords();
     return true;
   } catch (e) {
-    say("Could not save on this device. Download a backup now.", true);
-    return false;
+    if (user !== owner) return;
+    say("Could not load records: " + e.message, true);
+    $("retry").hidden = false;
   }
+}
+
+/* records saved by the earlier version of this app, before login existed */
+function deviceRecords() {
+  try {
+    const saved = localStorage.getItem(KEY);
+    return saved ? parseData(saved) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function showDeviceRecords() {
+  const old = deviceRecords();
+  const count = old ? old.sales.length + old.expenses.length : 0;
+  $("uploadDevice").hidden = !count;
+  $("uploadDevice").textContent = `Upload ${count} record(s) saved on this device`;
+  if (count) say("Records from the old version were found. Upload them from the Backup tab.");
 }
 
 /* ---------- rendering ---------- */
@@ -156,6 +207,7 @@ const addLabels = { sales: "Add sale", expenses: "Add expense" };
 function resetForm(type) {
   const form = forms[type];
   editing[type] = null;
+  delete form.dataset.pending;
   form.reset();
   form.elements.date.value = today();
   form.querySelector(".primary").textContent = addLabels[type];
@@ -176,17 +228,28 @@ function startEdit(type, id) {
   form.scrollIntoView({ behavior: "smooth" });
 }
 
-function remove(type, id) {
+async function remove(type, id) {
   if (!confirm("Delete this entry?")) return;
-  data[type] = data[type].filter((r) => r.id !== id);
-  if (editing[type] === id) resetForm(type);
-  if (save()) say("Deleted.");
-  render();
+  const owner = user;
+  try {
+    const rows = check(await db.from(type).delete().eq("id", id).select("id"));
+    if (user !== owner) return;
+    if (!rows.length) throw new Error("Entry not found. Reload the page.");
+    data[type] = data[type].filter((r) => r.id !== id);
+    if (editing[type] === id) resetForm(type);
+    say("Deleted.");
+    render();
+  } catch (e) {
+    if (user === owner) say("Could not delete: " + e.message, true);
+  }
 }
 
-function submit(type, event) {
+async function submit(type, event) {
   event.preventDefault();
-  const record = Object.fromEntries(new FormData(forms[type]));
+  const form = forms[type];
+  const button = form.querySelector(".primary");
+  if (button.disabled) return;
+  const record = Object.fromEntries(new FormData(form));
   for (const key of ["boxes", "rate", "amount"]) {
     if (key in record) record[key] = Number(record[key]);
   }
@@ -194,14 +257,31 @@ function submit(type, event) {
     if (key in record) record[key] = record[key].trim();
   }
   if (record.variety === "") return say("Enter a variety.", true);
+  const owner = user;
   const old = data[type].find((r) => r.id === editing[type]);
-  record.id = old ? old.id : newId();
+  // a retry after a network error reuses the id, so nothing is added twice
+  record.id = old ? old.id : (form.dataset.pending ||= newId());
   record.season = old ? old.season : season;
-  if (old) data[type][data[type].indexOf(old)] = record;
-  else data[type].push(record);
-  resetForm(type);
-  if (save()) say(old ? "Updated." : "Added.");
-  render();
+
+  button.disabled = true;
+  say("Saving...");
+  try {
+    if (old) {
+      const rows = check(await db.from(type).update(record).eq("id", record.id).select("id"));
+      if (!rows.length) throw new Error("Entry not found. Reload the page.");
+    } else {
+      check(await db.from(type).upsert({ ...record, user_id: owner.id }, { onConflict: "user_id,id" }));
+    }
+    if (user !== owner) return;
+    data[type] = [...data[type].filter((r) => r.id !== record.id), record];
+    resetForm(type);
+    say(old ? "Updated." : "Added.");
+    render();
+  } catch (e) {
+    if (user === owner) say("Not saved: " + e.message, true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function preview() {
@@ -259,25 +339,110 @@ $("exportJson").addEventListener("click", () =>
 $("exportCsv").addEventListener("click", () => download(`apple-season-${season}.csv`, toCsv(), "text/csv"));
 $("importJson").addEventListener("change", async (e) => {
   const file = e.target.files[0];
-  if (!file) return;
-  try {
-    const incoming = parseData(await file.text());
-    if (confirm("Replace all current records with this backup?")) {
-      data = incoming;
-      resetForm("sales");
-      resetForm("expenses");
-      if (save()) say("Backup restored.");
-      render();
-    }
-  } catch (err) {
-    say("That file is not a valid backup.", true);
-  }
   e.target.value = "";
+  if (!file) return;
+  let incoming;
+  try {
+    incoming = parseData(await file.text());
+  } catch (err) {
+    return say("That file is not a valid backup.", true);
+  }
+  if (confirm("Add this backup to your account? Entries with the same ID are overwritten.")) await importRecords(incoming);
 });
 
-load();
+async function importRecords(incoming) {
+  const owner = user;
+  say("Uploading...");
+  try {
+    await upload(incoming, owner.id);
+    if (user !== owner) return false;
+    if (await loadRecords()) say("Records uploaded.");
+    return true;
+  } catch (e) {
+    if (user === owner) say("Upload failed: " + e.message, true);
+    return false;
+  }
+}
+
+$("uploadDevice").addEventListener("click", async () => {
+  const old = deviceRecords();
+  if (!old || !confirm(`Upload these records to ${user.email}?`)) return;
+  $("uploadDevice").disabled = true;
+  if (await importRecords(old)) {
+    try { // keep a copy, but never offer it to another account
+      localStorage.setItem(KEY + "-uploaded", localStorage.getItem(KEY));
+      localStorage.removeItem(KEY);
+    } catch (_) { /* storage blocked */ }
+    $("uploadDevice").hidden = true;
+  }
+  $("uploadDevice").disabled = false;
+});
+
+/* ---------- login ---------- */
+function setUser(next) {
+  if (user !== undefined && (user?.id ?? null) === (next?.id ?? null)) return;
+  user = next;
+  data = { sales: [], expenses: [] };
+  season = new Date().getFullYear();
+  resetForm("sales");
+  resetForm("expenses");
+  render();
+  document.querySelector('nav [data-view="sales"]').click();
+  $("auth").hidden = Boolean(user);
+  $("account").hidden = !user;
+  $("who").textContent = user ? user.email : "";
+  $("app").hidden = true;
+  $("retry").hidden = true;
+  $("authForm").reset();
+  say("");
+  if (user) loadRecords();
+}
+
+async function authenticate(event) {
+  event.preventDefault();
+  const signingUp = event.submitter?.value === "signup";
+  const f = $("authForm").elements;
+  const credentials = { email: f.email.value.trim(), password: f.password.value };
+  const buttons = $("authForm").querySelectorAll("button");
+  buttons.forEach((b) => (b.disabled = true));
+  say(signingUp ? "Creating account..." : "Logging in...");
+  try {
+    if (signingUp) {
+      const result = check(await db.auth.signUp({
+        ...credentials, options: { emailRedirectTo: location.origin + location.pathname },
+      }));
+      if (!result.session) say("Check your email to confirm, then log in. If you already have an account, just log in.");
+    } else {
+      check(await db.auth.signInWithPassword(credentials));
+    }
+  } catch (e) {
+    say(e.message, true);
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+  }
+}
+
+function start() {
+  if (!config.url || !config.key) return say("Setup needed: add your Supabase URL and key in config.js.", true);
+  if (!window.supabase) return say("Could not load. Check your internet and reload.", true);
+  try {
+    db = window.supabase.createClient(config.url, config.key);
+  } catch (e) {
+    return say("Check config.js: " + e.message, true);
+  }
+  $("authForm").addEventListener("submit", authenticate);
+  $("retry").addEventListener("click", loadRecords);
+  $("logout").addEventListener("click", async () => {
+    const { error } = await db.auth.signOut({ scope: "local" });
+    if (error) say("Could not log out: " + error.message, true);
+  });
+  // deferred: calling Supabase inside this callback can lock up the client
+  db.auth.onAuthStateChange((_event, session) => setTimeout(() => setUser(session?.user ?? null), 0));
+}
+
 resetForm("sales");
 resetForm("expenses");
 render();
+start();
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

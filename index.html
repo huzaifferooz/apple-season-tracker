@@ -12,10 +12,23 @@
 <body>
   <header>
     <h1>Apple Season Tracker</h1>
-    <label class="season">Season <select id="season"></select></label>
+    <div id="account" hidden><span id="who"></span> <button type="button" id="logout">Log out</button></div>
   </header>
 
   <main>
+    <section id="auth" hidden>
+      <form id="authForm">
+        <h2 class="wide">Log in</h2>
+        <label class="wide">Email <input type="email" name="email" autocomplete="email" required></label>
+        <label class="wide">Password <input type="password" name="password" autocomplete="current-password" minlength="6" required></label>
+        <button class="primary wide" value="login">Log in</button>
+        <button class="wide" value="signup">Create account</button>
+      </form>
+    </section>
+    <button type="button" id="retry" hidden>Try again</button>
+
+    <div id="app" hidden>
+    <label class="season">Season <select id="season"></select></label>
     <section class="summary" aria-live="polite">
       <p class="label" id="profitLabel">Profit</p>
       <p class="profit" id="profit">₹0</p>
@@ -68,11 +81,14 @@
     </section>
 
     <section id="backup" class="view" hidden>
-      <p>Records are saved only in this browser. Download a backup often.</p>
+      <p>Records are saved to your account. You can also keep a copy.</p>
+      <button type="button" class="primary" id="uploadDevice" hidden></button>
       <button type="button" class="primary" id="exportJson">Download backup (all seasons)</button>
       <button type="button" id="exportCsv">Download this season (CSV)</button>
-      <label class="file">Restore from backup <input type="file" id="importJson" accept=".json,application/json"></label>
+      <label class="file">Import a backup <input type="file" id="importJson" accept=".json,application/json"></label>
     </section>
+
+    </div>
 
     <p id="message" role="status"></p>
   </main>
@@ -82,6 +98,9 @@
     <option value="Maharaji"><option value="Golden"><option value="Gala"><option value="Ambri">
   </datalist>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"
+    integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
