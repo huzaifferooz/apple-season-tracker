@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#8f1d2c">
+  <title>Apple Season Tracker</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Apple Season Tracker</h1>
+    <label class="season">Season <select id="season"></select></label>
+  </header>
+
+  <main>
+    <section class="summary" aria-live="polite">
+      <p class="label" id="profitLabel">Profit</p>
+      <p class="profit" id="profit">₹0</p>
+      <dl>
+        <div><dt>Sales</dt><dd id="revenue">₹0</dd></div>
+        <div><dt>Expenses</dt><dd id="spent">₹0</dd></div>
+        <div><dt>Boxes sold</dt><dd id="boxes">0</dd></div>
+        <div><dt>Avg per box</dt><dd id="average">₹0</dd></div>
+      </dl>
+    </section>
+
+    <nav>
+      <button type="button" data-view="sales" class="active">Sales</button>
+      <button type="button" data-view="expenses">Expenses</button>
+      <button type="button" data-view="report">Report</button>
+      <button type="button" data-view="backup">Backup</button>
+    </nav>
+
+    <section id="sales" class="view">
+      <form id="saleForm">
+        <label>Date <input type="date" name="date" required></label>
+        <label>Variety <input name="variety" list="varieties" required maxlength="40" placeholder="Delicious"></label>
+        <label>Boxes <input type="number" name="boxes" min="1" step="1" inputmode="numeric" required></label>
+        <label>Rate per box (₹) <input type="number" name="rate" min="0.01" step="0.01" inputmode="decimal" required></label>
+        <label class="wide">Buyer / mandi <input name="buyer" maxlength="60" placeholder="Optional"></label>
+        <p class="wide preview" id="salePreview">Total: ₹0</p>
+        <button class="primary wide">Add sale</button>
+        <button type="button" class="cancel wide" hidden>Cancel edit</button>
+      </form>
+      <ul id="saleList" class="list"></ul>
+    </section>
+
+    <section id="expenses" class="view" hidden>
+      <form id="expenseForm">
+        <label>Date <input type="date" name="date" required></label>
+        <label>Category <select name="category"></select></label>
+        <label>Amount (₹) <input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>
+        <label>Note <input name="note" maxlength="60" placeholder="Optional"></label>
+        <button class="primary wide">Add expense</button>
+        <button type="button" class="cancel wide" hidden>Cancel edit</button>
+      </form>
+      <ul id="expenseList" class="list"></ul>
+    </section>
+
+    <section id="report" class="view" hidden>
+      <h2>Sales by variety</h2>
+      <div id="byVariety"></div>
+      <h2>Expenses by category</h2>
+      <div id="byCategory"></div>
+    </section>
+
+    <section id="backup" class="view" hidden>
+      <p>Records are saved only in this browser. Download a backup often.</p>
+      <button type="button" class="primary" id="exportJson">Download backup (all seasons)</button>
+      <button type="button" id="exportCsv">Download this season (CSV)</button>
+      <label class="file">Restore from backup <input type="file" id="importJson" accept=".json,application/json"></label>
+    </section>
+
+    <p id="message" role="status"></p>
+  </main>
+
+  <datalist id="varieties">
+    <option value="Delicious"><option value="Kullu Delicious"><option value="American">
+    <option value="Maharaji"><option value="Golden"><option value="Gala"><option value="Ambri">
+  </datalist>
+
+  <script src="app.js"></script>
+</body>
+</html>

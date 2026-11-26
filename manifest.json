@@ -1,0 +1,9 @@
+{
+  "name": "Apple Season Tracker",
+  "short_name": "Apple Tracker",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f1",
+  "theme_color": "#8f1d2c",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
